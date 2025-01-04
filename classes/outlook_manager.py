@@ -1,11 +1,6 @@
 from dotenv import load_dotenv
 import os
 import pandas as pd
-from exchangelib import Account, Credentials, DELEGATE
-from office365.runtime.auth.authentication_context import AuthenticationContext
-from office365.runtime.auth.user_credential import UserCredential
-from office365.sharepoint.client_context import ClientContext
-from office365.sharepoint.files.file import File
 import imaplib
 import email
 from email.header import decode_header
@@ -13,23 +8,26 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import date, datetime, timedelta
-from pathlib import PurePath
-import json
 import re
 from collections import defaultdict
+import imaplib
+import socket
 
+script_dir = os.path.dirname(__file__)
 
 # Cargar variables de entorno
 load_dotenv()
 
+
 # Variables globales
 SUBJECT_FILTER = os.getenv("SUBJECT_FILTER")
-DOWNLOAD_PATH = r'C:\Users\SALVADOR\OneDrive\CEPLAN\CeplanPythonCode\microsoft\descargas'  # Carpeta de descargas
-UPLOAD_PATH = r'C:\Users\SALVADOR\OneDrive\CEPLAN\CeplanPythonCode\microsoft\descargas\clasificados'  # Carpeta desde donde se subirán archivos
-TEMPLATES_PATH = r'C:\Users\SALVADOR\OneDrive\CEPLAN\CeplanPythonCode\microsoft\email_templates' # Carpeta desde la que se obtendrán los email templates
+DOWNLOAD_PATH = os.path.join(script_dir, "..", "descargas")  # Carpeta de descargas
+UPLOAD_PATH = os.path.join(script_dir, "..", "descargas", "clasificados")  # Carpeta desde donde se subirán archivos
+TEMPLATES_PATH = os.path.join(script_dir, "..", "email_templates") # Carpeta desde la que se obtendrán los email templates
 
 # Credenciales Outlook
-IMAP_PORT = os.getenv("IMAP_PORT")  # Puerto para conexión segura
+#IMAP_PORT = os.getenv("IMAP_PORT")  # Puerto para conexión segura
+IMAP_PORT = 993
 IMAP_SERVER = os.getenv("IMAP_SERVER")  
 OUTLOOK_EMAIL = os.getenv("OUTLOOK_EMAIL")
 OUTLOOK_SENDER_EMAIL = os.getenv("OUTLOOK_SENDER_EMAIL")
@@ -37,31 +35,30 @@ OUTLOOK_PASSWORD = os.getenv("OUTLOOK_PASSWORD")
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = os.getenv("SMTP_PORT")
 
-# Credenciales Sharepoint
-SHAREPOINT_EMAIL = os.getenv("SHAREPOINT_EMAIL")
-SHAREPOINT_PASSWORD = os.getenv("SHAREPOINT_PASSWORD")
-SHAREPOINT_URL_SITE = os.getenv("SHAREPOINT_URL_SITE") # Ruta fija (Enlace)
-SHAREPOINT_SITE_NAME = os.getenv("SHAREPOINT_SITE_NAME") # Nombre de la ruta fija (DNPE)
-SHAREPOINT_FOLDER = os.getenv("SHAREPOINT_FOLDER") # Ruta del canal (Documentos compartidos/AOI Tendencias)
-SHAREPOINT_DOC = os.getenv("SHAREPOINT_DOC") # Ruta específica del folder (Prueba)
 
-
-
-# Clases
 class OutlookRetriever:
     def __init__(self):
-        self.mail=None
+        self.mail = None
         
     def _auth(self):
         print("- Intentando establecer conexión con Outlook...")
         try:
+            # Verify the server is reachable first
+            socket.gethostbyname(IMAP_SERVER)
+            
             self.mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
             self.mail.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
             print(f'- Conexión IMAP exitosa para el correo {OUTLOOK_EMAIL}')
+            
+        except socket.gaierror as e:
+            raise ValueError(f"- Error de resolución DNS: No se puede conectar a {IMAP_SERVER}. "
+                           f"Verifique su conexión a internet y las variables IMAP_SERVER/PORT: {e}")
+            
         except imaplib.IMAP4.error as e:
-            raise ValueError(f"- Error de conexión IMAP: {e}")
+            raise ValueError(f"- Error de autenticación IMAP: Verifique sus credenciales: {e}")
+            
         except Exception as e:
-            raise ValueError(f"- Unexpected error during IMAP authentication: {e}")
+            raise ValueError(f"- Error inesperado durante la autenticación IMAP: {str(e)}")
             
 
     @staticmethod
@@ -420,243 +417,6 @@ class EmailTemplate:
 
 
 
-class Sharepoint():
-    def __init__(self):
-        self.conn= None
-
-    def _auth(self):
-        try:
-            self.conn = AuthenticationContext(SHAREPOINT_URL_SITE)
-            if self.conn.acquire_token_for_user(SHAREPOINT_EMAIL, SHAREPOINT_PASSWORD):
-                self.conn = ClientContext(SHAREPOINT_URL_SITE, self.conn)
-                print("Autenticación exitosa. Conexión establecida con SharePoint")
-        except Exception as e:
-            print(f"Error al autenticar: {e}")
-            return None
-    
-    def list_files(self, target_folder = "", target_folder_url=""):
-        files_list = []
-        if not target_folder_url:
-            if target_folder:
-                target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}/{SHAREPOINT_DOC}/{target_folder}' 
-            else:
-                target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}/{SHAREPOINT_DOC}' 
-        folder_name = target_folder_url.split("/")[-1]
-        try:
-            root_folder = self.conn.web.get_folder_by_server_relative_url(target_folder_url)   # Concatenates and formats the path
-            root_folder.expand(["Files", "Folders"]).get().execute_query()  # Preguntar qué hace esto y por qué ese expand
-            print(f'Archivos presentes en la carpeta "{folder_name}":')
-        except Exception as e:
-            print(f"No se encontró la carpeta con el path {folder_name}")
-        #print(root_folder.files)
-        for file in root_folder.files:
-            print(f' - {file.name}')  # Imprime solo el nombre de cada archivo
-            files_list.append(file.name)
-            #print(file.content)
-        return files_list, root_folder.files
-    
-    
-    def upload_file(self, file_name, target_folder_path="", create_folder = False):
-        """
-        Uploads a file to SharePoint. Optionally, a folder can be created with the same name as the file.
-
-        Args:
-            file_name (str): Name of the file to upload, including the extension.
-            target_folder_path (str, optional): SharePoint folder path to upload the file to 
-                (e.g., "Tendencias/Tendencias Nacionales"). Default is the root folder from env.
-            create_folder (bool, optional): If True, creates a folder with the same name as the file 
-                (if it doesn't exist) before uploading. Default is False.
-        
-        Returns:
-            bool: True if the upload was successful, otherwise raises an exception.
-        """
-        file_path = os.path.join(UPLOAD_PATH, file_name)
-        with open(file_path, "rb") as file:
-            content = file.read()  # Read binary content of the file       
-
-        # Construct the target SharePoint folder URL
-        target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}/{SHAREPOINT_DOC}'
-        if target_folder_path:
-            target_folder_url = f'{target_folder_url}/{target_folder_path}'     
-
-        try:
-            # Folder creation logic
-            if create_folder:
-                folder_name = os.path.splitext(file_name)[0]
-                folder_list = self.list_files(target_folder_url=target_folder_url)
-                if folder_name not in folder_list:
-                    # Create folder if it doesn't exist
-                    new_folder_url = f"{target_folder_url}/{folder_name}"
-                    self.conn.web.ensure_folder_path(new_folder_url).execute_query()
-                    print(f"Folder '{folder_name}' created successfully.")
-                    target_folder_url = new_folder_url
-
-            # Get the target_folder object
-            target_folder = self.conn.web.get_folder_by_server_relative_path(target_folder_url)
-
-            # Upload the file            
-            upload_status = target_folder.upload_file(file_name, content).execute_query()
-            if upload_status:
-                print(f"File '{file_name}' uploaded successfully to '{target_folder_url}'.")
-                return True
-        except Exception as e:
-            print(f'No se pudo subir el archivo {file_name} a la carpeta "{target_folder_url}')
-            return False
-
-
-    def upload_files_from_folder(self, folder_name):
-        """
-        No tiene mucha utilidad por ahora
-
-        Args:
-            folder_name (str)
-
-        Returns:
-            uploaded_files (list)
-        """
-        uploaded_files = []
-        if folder_name:
-            local_folder_path = os.path.join(UPLOAD_PATH, folder_name) 
-
-        # Verificar que la carpeta local exista
-        if not os.path.exists(local_folder_path):
-            print(f"La carpeta local {local_folder_path} no existe.")
-            return uploaded_files  # Si la carpeta no existe, retornar lista vacía
-        
-        try:
-            for file_name in os.listdir(local_folder_path):
-                file_path = os.path.join(local_folder_path, file_name)
-
-                if os.path.isfile(file_path):
-                    try:
-                        upload_status = self.upload_file(file_path, folder_name)
-
-                        if upload_status:
-                            uploaded_files.append(file_name)
-                    except Exception as e:
-                        print(f"Error subiendo el archivo {file_name}: {e}")
-
-        except Exception as e:
-            print(f"Error al acceder a la carpeta local {local_folder_path}: {e}")
-
-        print(f"Total de archivos subidos: {len(uploaded_files)}")
-        return uploaded_files
-    
-    def download_file(self, file_name):
-        """
-        Falta modularizar
-        """
-        download_path = DOWNLOAD_PATH
-        file_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}/{SHAREPOINT_DOC}/{file_name}' 
-        file = File.open_binary(self.conn, file_url) # Preguntar qué hace esto
-        # Ruta local donde quieres guardar el archivo
-        local_file_path = os.path.join(download_path, file_name)
-    
-        # Escribir el contenido binario en el archivo local
-        with open(local_file_path, 'wb') as local_file:
-            local_file.write(file.content)
-    
-        print(f"El archivo {file_name} ha sido descargado con éxito en {local_file_path}.")
-        return local_file_path
-    
-    def download_files(self, target_folder, extension=""):
-        return None
-    
-
-    
-
-
-class FileManager():
-    def __init__(self, search_directory):
-        """
-        Inicializa el gestor de archivos.
-
-        :param search_directory: Directorio donde se buscarán los archivos.
-        :param target_directories: Diccionario con extensiones como claves y carpetas destino como valores.
-        """
-        self.search_directory = search_directory
-        #self.target_directories = target_directories
-
-    def list_files(self):
-        file_paths_list = []
-        file_names_list = []
-        print(f'Archivos presentes en la carpeta {self.search_directory}:')
-        for item in os.listdir(self.search_directory):
-            item_full_path = os.path.join(self.search_directory, item)
-            if os.path.isfile(item_full_path):
-                file_paths_list.append([item, item_full_path])
-                file_names_list.append(item)
-                print(f" - {item}")
-
-        #print(file_paths_list)
-        if not file_paths_list:
-            print(" - No se encontraron archivos en la carpeta")
-        return file_names_list
-        #return file_paths_list
-
-    def rename_files(self, diccionario, lowercase = True):
-        """
-        Renombrar archivos en una carpeta a partir de valores de un diccionario
-        
-        Args:
-            carpeta (str): Ruta de la carpeta donde están los archivos descargados.
-            diccionario (dict): Diccionario para buscar los nombres en los keys y cambiarlos por sus values.
-            lowercase (bool): Si es true, antes de renombrar según el dict, se convierte a minúsculas
-        Returns: 
-            renamed_files_map (list): List of renamed files
-        """
-        renamed_files_map = {}
-         # Crear subcarpetas para clasificados y no clasificados
-        carpeta_clasificados = os.path.join(self.search_directory, "clasificados")
-        carpeta_no_clasificados = os.path.join(self.search_directory, "no_clasificados")
-        os.makedirs(carpeta_clasificados, exist_ok=True)
-        os.makedirs(carpeta_no_clasificados, exist_ok=True)
-
-        for archivo in os.listdir(self.search_directory):
-            archivo_path = os.path.join(self.search_directory, archivo)
-
-            # Asegurar que es un archivo y no una carpeta
-            if not os.path.isfile(archivo_path):
-                continue
-
-            # Extraer patron del nombre del archivo (si está presente)
-            nombre_original, extension = os.path.splitext(archivo)
-            if lowercase:
-                nombre_modificado = nombre_original.lower()
-            else:
-                nombre_modificado = nombre_original
-            patron = re.split(r'[\s-]', nombre_modificado)[0].strip()  # Se asume que el patrón está antes del primer espacio o del primero guion
-            #print(f"Este es el código: {patron}")
-
-            if patron in diccionario:
-                # Si el código está en los datos, mover a 'clasificados'
-                titulo_nuevo = diccionario[patron].get("titulo_largo", "sin_título").replace("/", "-").strip() # cambiar esta parte para que sea modular
-                nuevo_nombre = f"{patron} - {titulo_nuevo}{extension}"
-                nuevo_path = os.path.join(self.search_directory, "clasificados", nuevo_nombre)
-                renamed_files_map[archivo] = nuevo_nombre
-                clasificacion = "clasificados"
-            else:
-                # Si no se reconoce el código, mover a 'no_clasificados'
-                nuevo_path = os.path.join(self.search_directory, "no_clasificados", archivo)
-                clasificacion = "no_clasificados"
-            
-            # Verificar si el archivo ya existe en el destino y eliminarlo si es necesario
-            if os.path.exists(nuevo_path):
-                print(f"El archivo '{nuevo_path}' ya existe. Reemplazando...")
-                os.remove(nuevo_path)  # Eliminar archivo existente
-
-            # Mover el archivo al destino correspondiente
-            os.rename(archivo_path, nuevo_path)
-            print(f"Archivo '{archivo}' -> movido a: {clasificacion}")
-        return renamed_files_map
-
-    def rename_files2(self, format = "" , diccionario = {}):
-        """
-        Renombrar archivos según un formato específico
-        """
-        self.search_directory
-
-
 
 # sharepoint_session = Sharepoint()
 # sharepoint_session._auth()
@@ -669,8 +429,8 @@ class FileManager():
 # gestionar subir archivos solo en modo lectura
 
 
-# outlook_session = OutlookRetriever()
-# outlook_session._auth()
+#outlook_session = OutlookRetriever()
+#outlook_session._auth()
 # emails = outlook_session.get_emails(start_date="6-Dec-2024")
 # print(outlook_session.download_attachments(emails))
 
