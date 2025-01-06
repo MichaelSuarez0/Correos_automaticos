@@ -26,8 +26,8 @@ SHAREPOINT_EMAIL = os.getenv("SHAREPOINT_EMAIL")
 SHAREPOINT_PASSWORD = os.getenv("SHAREPOINT_PASSWORD")
 SHAREPOINT_URL_SITE = os.getenv("SHAREPOINT_URL_SITE") # Ruta fija (Enlace)
 SHAREPOINT_SITE_NAME = os.getenv("SHAREPOINT_SITE_NAME") # Nombre de la ruta fija (DNPE)
-SHAREPOINT_FOLDER = os.getenv("SHAREPOINT_FOLDER") # Ruta del canal (Documentos compartidos/AOI Tendencias)
-SHAREPOINT_DOC = os.getenv("SHAREPOINT_DOC") # Ruta específica del folder (Prueba)
+SHAREPOINT_FOLDER = os.getenv("SHAREPOINT_FOLDER") # Ruta del folder (Documentos compartidos/AOI Tendencias/Prueba)
+SHAREPOINT_USERNAME = os.getenv("SHAREPOINT_USERNAME") # Nombre del usuario (msuarez_ceplan_gob_pe)
 
 
 class Sharepoint():
@@ -44,29 +44,84 @@ class Sharepoint():
             print(f"Error al autenticar: {e}")
             return None
     
-    def list_files(self, target_folder = "", target_folder_url=""):
-        files_list = []
-        if not target_folder_url:
-            if target_folder:
-                target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}/{SHAREPOINT_DOC}/{target_folder}' 
+    def list_files(self, custom_folder_path="", personal=False):
+        """_summary_
+
+        Args:
+            target_folder (str, optional): _description_. Defaults to "".
+            personal (bool, optional): _description_. Defaults to False.
+
+        Returns:
+            _type_: _description_
+        """
+        file_metadata = []
+
+        # Decide the base URL based on whether it's personal or a team site
+        if not custom_folder_path:
+            if personal:
+                # If 'personal' is True, the URL will start with '/personal/'
+                target_folder_url = f'/personal/{SHAREPOINT_USERNAME}/{SHAREPOINT_FOLDER}'
             else:
-                target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}/{SHAREPOINT_DOC}' 
+                # If 'persona' is False, the URL will start with '/sites/'
+                target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}/{SHAREPOINT_FOLDER}'
+        else:
+            if personal:
+                target_folder_url = f'/personal/{custom_folder_path}'
+            else:
+                target_folder_url = f'/sites/{custom_folder_path}'
+
+        # Extract folder name from the path
         folder_name = target_folder_url.split("/")[-1]
+
         try:
-            root_folder = self.conn.web.get_folder_by_server_relative_url(target_folder_url)   # Concatenates and formats the path
-            root_folder.expand(["Files", "Folders"]).get().execute_query()  # Preguntar qué hace esto y por qué ese expand
+            # Get the folder by the server-relative URL
+            root_folder = self.conn.web.get_folder_by_server_relative_url(target_folder_url)
+            
+            # Expand the folder to include files and subfolders (this is why we use 'expand')
+            root_folder.expand(["Files", "Folders"]).get().execute_query()  # No way to include author here
             print(f'Archivos presentes en la carpeta "{folder_name}":')
+            print(f"Total de archivos encontrados: {len(root_folder.files)}")
         except Exception as e:
-            print(f"No se encontró la carpeta con el path {folder_name}")
-        #print(root_folder.files)
+            print(f"No se encontró la carpeta con el path {target_folder_url}")
+            return None
+
+        # Iterate over the files and retrieve metadata
         for file in root_folder.files:
-            print(f' - {file.name}')  # Imprime solo el nombre de cada archivo
-            files_list.append(file.name)
-            #print(file.content)
-        return files_list, root_folder.files
+            # Ensure ListItemAllFields is loaded
+            list_item = file.listItemAllFields
+
+            # Safely access fields
+            editor = getattr(list_item, "EditorId", None)  # Editor ID or None if not present
+            time_created = file.time_created  # Directly access if it's a datetime object
+            time_modified = file.time_last_modified  # Directly access if it's a datetime object
+
+            # Format times as strings
+            time_created = time_created.strftime("%Y-%m-%d %H:%M:%S") if time_created else None
+            time_modified = time_modified.strftime("%Y-%m-%d %H:%M:%S") if time_modified else None
+
+            #Ensure that the author property is loaded (slows down retrieval)
+            file.context.load(file, ["Author"])  # Explicitly load the author property 
+            file.context.execute_query()
+
+            #Access the author data (returns email)
+            author_data = file.author
+            print(author_data)
+            
+            file_metadata.append({
+                "name": file.name,
+                "server_relative_url": file.serverRelativeUrl,
+                "time_created": time_created,
+                "time_last_modified": time_modified,
+                "author": file.author,
+                "editor": editor,
+                "uniqueId": file.unique_id,
+            })
+            print(f' - {file.name}')  # Print only the name of each file
+
+        return file_metadata
     
     
-    def upload_file(self, file_name, target_folder_path="", create_folder = False):
+    def upload_file(self, file_name, custom_folder_path="", create_folder = False):
         """
         Uploads a file to SharePoint. Optionally, a folder can be created with the same name as the file.
 
@@ -85,9 +140,9 @@ class Sharepoint():
             content = file.read()  # Read binary content of the file       
 
         # Construct the target SharePoint folder URL
-        target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}/{SHAREPOINT_DOC}'
-        if target_folder_path:
-            target_folder_url = f'{target_folder_url}/{target_folder_path}'     
+        target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}'
+        if custom_folder_path:
+            target_folder_url = f'/sites/{custom_folder_path}'     
 
         try:
             # Folder creation logic
@@ -152,12 +207,24 @@ class Sharepoint():
         print(f"Total de archivos subidos: {len(uploaded_files)}")
         return uploaded_files
     
-    def download_file(self, file_name):
+    def download_file(self, file_name, custom_folder_path = "", personal = False):
         """
         Falta modularizar
         """
         download_path = DOWNLOAD_PATH
-        file_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}/{SHAREPOINT_DOC}/{file_name}' 
+        if not custom_folder_path:
+            if personal:
+                # If 'personal' is True, the URL will start with '/personal/'
+                file_url = f'/personal/{SHAREPOINT_USERNAME}/{SHAREPOINT_FOLDER}/{file_name}'
+            else:
+                # If 'persona' is False, the URL will start with '/sites/'
+                file_url = f'/sites/{SHAREPOINT_SITE_NAME}/{SHAREPOINT_FOLDER}/{file_name}'
+        else:
+            if personal:
+                file_url = f'/personal/{custom_folder_path}/{file_name}'
+            else:
+                file_url = f'/sites/{custom_folder_path}/{file_name}'
+
         file = File.open_binary(self.conn, file_url) # Preguntar qué hace esto
         # Ruta local donde quieres guardar el archivo
         local_file_path = os.path.join(download_path, file_name)
