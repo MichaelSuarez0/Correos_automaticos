@@ -44,18 +44,8 @@ class Sharepoint():
             print(f"Error al autenticar: {e}")
             return None
     
-    def list_files(self, custom_folder_path="", personal=False):
-        """_summary_
-
-        Args:
-            target_folder (str, optional): _description_. Defaults to "".
-            personal (bool, optional): _description_. Defaults to False.
-
-        Returns:
-            _type_: _description_
-        """
-        file_metadata = []
-
+    @staticmethod
+    def _select_folder(custom_folder_path = "", folder_name= "", personal = False):
         # Decide the base URL based on whether it's personal or a team site
         if not custom_folder_path:
             if personal:
@@ -69,6 +59,25 @@ class Sharepoint():
                 target_folder_url = f'/personal/{custom_folder_path}'
             else:
                 target_folder_url = f'/sites/{custom_folder_path}'
+        if folder_name:
+            target_folder_url = f'{target_folder_url}/{folder_name}'
+        return target_folder_url
+    
+    
+    def list_files(self, custom_folder_path="", folder_name="", personal=False):
+        """_summary_
+
+        Args:
+            target_folder (str, optional): _description_. Defaults to "".
+            personal (bool, optional): _description_. Defaults to False.
+
+        Returns:
+            _type_: _description_
+        """
+        file_metadata = []
+
+        # Decide the base URL based on whether it's personal or a team site
+        target_folder_url = self._select_folder(custom_folder_path, folder_name, personal)
 
         # Extract folder name from the path
         folder_name = target_folder_url.split("/")[-1]
@@ -100,12 +109,11 @@ class Sharepoint():
             time_modified = time_modified.strftime("%Y-%m-%d %H:%M:%S") if time_modified else None
 
             #Ensure that the author property is loaded (slows down retrieval)
-            file.context.load(file, ["Author"])  # Explicitly load the author property 
-            file.context.execute_query()
-
+            # file.context.load(file, ["Author"])  # Explicitly load the author property 
+            # file.context.execute_query()
             #Access the author data (returns email)
-            author_data = file.author
-            print(author_data)
+            # author_data = file.author
+            # print(author_data)
             
             file_metadata.append({
                 "name": file.name,
@@ -121,7 +129,7 @@ class Sharepoint():
         return file_metadata
     
     
-    def upload_file(self, file_name, custom_folder_path="", create_folder = False):
+    def upload_file(self, file_name, custom_folder_path="", folder_name="", create_folder = False, personal = False):
         """
         Uploads a file to SharePoint. Optionally, a folder can be created with the same name as the file.
 
@@ -140,15 +148,13 @@ class Sharepoint():
             content = file.read()  # Read binary content of the file       
 
         # Construct the target SharePoint folder URL
-        target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}{SHAREPOINT_FOLDER}'
-        if custom_folder_path:
-            target_folder_url = f'/sites/{custom_folder_path}'     
+        target_folder_url = self._select_folder(custom_folder_path, personal)
 
         try:
             # Folder creation logic
             if create_folder:
                 folder_name = os.path.splitext(file_name)[0]
-                folder_list = self.list_files(target_folder_url=target_folder_url)
+                folder_list = self.list_files(target_folder_url)
                 if folder_name not in folder_list:
                     # Create folder if it doesn't exist
                     new_folder_url = f"{target_folder_url}/{folder_name}"
@@ -169,7 +175,7 @@ class Sharepoint():
             return False
 
 
-    def upload_files_from_folder(self, folder_name):
+    def allocate_files_from_folder(self, dictionary, personal):
         """
         No tiene mucha utilidad por ahora
 
@@ -180,8 +186,7 @@ class Sharepoint():
             uploaded_files (list)
         """
         uploaded_files = []
-        if folder_name:
-            local_folder_path = os.path.join(UPLOAD_PATH, folder_name) 
+        local_folder_path = UPLOAD_PATH
 
         # Verificar que la carpeta local exista
         if not os.path.exists(local_folder_path):
@@ -194,7 +199,7 @@ class Sharepoint():
 
                 if os.path.isfile(file_path):
                     try:
-                        upload_status = self.upload_file(file_path, folder_name)
+                        upload_status = self.upload_file(file_name, )
 
                         if upload_status:
                             uploaded_files.append(file_name)
@@ -206,38 +211,109 @@ class Sharepoint():
 
         print(f"Total de archivos subidos: {len(uploaded_files)}")
         return uploaded_files
-    
-    def download_file(self, file_name, custom_folder_path = "", personal = False):
+        
+
+    def download_file(self, file_url, file_name):
+        """
+        Descarga un archivo específico de SharePoint.
+
+        Args:
+            file_url (str): URL completa del archivo en SharePoint.
+            file_name (str): Nombre del archivo a guardar localmente.
+
+        Returns:
+            str: Ruta local del archivo descargado.
+        """
+        try:
+            # Descargar el archivo
+            file = File.open_binary(self.conn, file_url)
+
+            # Crear la ruta local para guardar el archivo
+            local_file_path = os.path.join(DOWNLOAD_PATH, file_name)
+
+            # Escribir el contenido en el archivo local
+            with open(local_file_path, 'wb') as local_file:
+                local_file.write(file.content)
+
+            print(f"Archivo descargado con éxito: {local_file_path}")
+            return local_file_path
+        except Exception as e:
+            print(f"No se pudo descargar el archivo {file_name}: {e}")
+            return None
+        
+        
+    def download_single_file(self, file_name, custom_folder_path = "", personal = False):
         """
         Falta modularizar
         """
-        download_path = DOWNLOAD_PATH
-        if not custom_folder_path:
-            if personal:
-                # If 'personal' is True, the URL will start with '/personal/'
-                file_url = f'/personal/{SHAREPOINT_USERNAME}/{SHAREPOINT_FOLDER}/{file_name}'
-            else:
-                # If 'persona' is False, the URL will start with '/sites/'
-                file_url = f'/sites/{SHAREPOINT_SITE_NAME}/{SHAREPOINT_FOLDER}/{file_name}'
-        else:
-            if personal:
-                file_url = f'/personal/{custom_folder_path}/{file_name}'
-            else:
-                file_url = f'/sites/{custom_folder_path}/{file_name}'
+        target_folder_url = self._select_folder(custom_folder_path, personal)
+        file_url = f'{target_folder_url}/{file_name}'
 
-        file = File.open_binary(self.conn, file_url) # Preguntar qué hace esto
-        # Ruta local donde quieres guardar el archivo
-        local_file_path = os.path.join(download_path, file_name)
-    
-        # Escribir el contenido binario en el archivo local
-        with open(local_file_path, 'wb') as local_file:
-            local_file.write(file.content)
-    
-        print(f"El archivo {file_name} ha sido descargado con éxito en {local_file_path}.")
+        try:
+            local_file_path = self.download_file(file_url, file_name)
+        except Exception as e:
+            print(f"Error al descargar el archivo '{file_name}': {e}")
         return local_file_path
     
-    def download_files(self, target_folder, extension=""):
-        return None
+    def download_files_from_folder(self, custom_folder_path="", folder_name="", personal=False, extension=""):
+        """
+        Descarga todos los archivos de una carpeta específica de SharePoint.
+        
+        Args:
+            custom_folder_path (str, optional): Ruta personalizada de la carpeta.
+            folder_name (str, optional): Nombre de la subcarpeta dentro de la carpeta personalizada.
+            personal (bool, optional): Indica si la carpeta es personal o de un sitio de equipo.
+            extension (str, optional): Filtra los archivos por extensión (e.g., '.txt', '.csv'). 
+                Si está vacío, descarga todos los archivos.
+
+        Returns:
+            list: Lista de rutas locales de los archivos descargados.
+        """
+        # Crear la URL de la carpeta de destino
+        target_folder_url = self._select_folder(custom_folder_path, folder_name, personal)
+
+        # Listar los archivos de la carpeta
+        files_metadata = self.list_files(custom_folder_path, folder_name, personal)
+        if not files_metadata:
+            print(f"No se encontraron archivos en la carpeta: {target_folder_url}")
+            return []
+
+        # Crear la carpeta local de descarga si no existe
+        if not os.path.exists(DOWNLOAD_PATH):
+            os.makedirs(DOWNLOAD_PATH)
+
+        downloaded_files = []
+
+        # Descargar cada archivo
+        for file_meta in files_metadata:
+            file_name = file_meta["name"]
+
+            # Filtrar por extensión si se especifica
+            if extension and not file_name.endswith(extension):
+                continue
+
+            # Construir la URL completa del archivo en SharePoint
+            file_url = file_meta["server_relative_url"]
+
+            try:
+                # Descargar el archivo
+                file = File.open_binary(self.conn, file_url)
+
+                # Crear la ruta local para guardar el archivo
+                local_file_path = os.path.join(DOWNLOAD_PATH, file_name)
+
+                # Escribir el contenido en el archivo local
+                with open(local_file_path, 'wb') as local_file:
+                    local_file.write(file.content)
+
+                print(f"Archivo descargado con éxito: {local_file_path}")
+                downloaded_files.append(local_file_path)
+            except Exception as e:
+                print(f"No se pudo descargar el archivo {file_name}: {e}")
+        print(f'Number of files downloaded: {len(downloaded_files)}')
+
+        return downloaded_files
+
     
 
     
