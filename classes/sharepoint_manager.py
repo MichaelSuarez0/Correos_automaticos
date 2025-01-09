@@ -8,6 +8,7 @@ from office365.sharepoint.client_context import ClientContext
 from office365.sharepoint.files.file import File
 from email.header import decode_header
 from datetime import date, datetime, timedelta
+import time
 
 
 script_dir = os.path.dirname(__file__)
@@ -24,60 +25,72 @@ TEMPLATES_PATH = os.path.join(script_dir, "..", "email_templates") # Carpeta des
 # Credenciales Sharepoint
 SHAREPOINT_EMAIL = os.getenv("SHAREPOINT_EMAIL")
 SHAREPOINT_PASSWORD = os.getenv("SHAREPOINT_PASSWORD")
+
+# Folders Sharepoint
 SHAREPOINT_URL_SITE = os.getenv("SHAREPOINT_URL_SITE") # Ruta fija (Enlace)
-SHAREPOINT_SITE_NAME = os.getenv("SHAREPOINT_SITE_NAME") # Nombre de la ruta fija (DNPE)
 SHAREPOINT_FOLDER = os.getenv("SHAREPOINT_FOLDER") # Ruta del folder (Documentos compartidos/AOI Tendencias/Prueba)
-SHAREPOINT_USERNAME = os.getenv("SHAREPOINT_USERNAME") # Nombre del usuario (msuarez_ceplan_gob_pe)
+
+# Para manejar diferentes funciones automáticamente
+SHAREPOINT_SITE_NAME = SHAREPOINT_URL_SITE.split("/")[-1]
+SHAREPOINT_ROOT_FOLDER = SHAREPOINT_URL_SITE.split("/")[-2]
+personal = True if SHAREPOINT_ROOT_FOLDER == "sites" else False
+
+# Custom folders siempre deben comenzar con "Documentos compartidos" o su equivalente
 
 
 class Sharepoint():
     def __init__(self):
         self.conn= None
 
-    def _auth(self):
+    def _auth(self, url = SHAREPOINT_URL_SITE):
         try:
-            self.conn = AuthenticationContext(SHAREPOINT_URL_SITE)
+            self.conn = AuthenticationContext(url)
             if self.conn.acquire_token_for_user(SHAREPOINT_EMAIL, SHAREPOINT_PASSWORD):
-                self.conn = ClientContext(SHAREPOINT_URL_SITE, self.conn)
-                print("Autenticación exitosa. Conexión establecida con SharePoint")
+                self.conn = ClientContext(url, self.conn)
+                print(f"Autenticación exitosa. Conexión establecida con SharePoint para {url}")
         except Exception as e:
             print(f"Error al autenticar: {e}")
             return None
     
     @staticmethod
-    def _select_folder(custom_folder_path = "", folder_name= "", personal = False):
+    def _select_folder(custom_folder_path = "", folder_name= ""):
         # Decide the base URL based on whether it's personal or a team site
         if not custom_folder_path:
-            if personal:
-                # If 'personal' is True, the URL will start with '/personal/'
-                target_folder_url = f'/personal/{SHAREPOINT_USERNAME}/{SHAREPOINT_FOLDER}'
-            else:
                 # If 'persona' is False, the URL will start with '/sites/'
-                target_folder_url = f'/sites/{SHAREPOINT_SITE_NAME}/{SHAREPOINT_FOLDER}'
+           target_folder_url = f'/{SHAREPOINT_ROOT_FOLDER}/{SHAREPOINT_SITE_NAME}/{SHAREPOINT_FOLDER}'
         else:
-            if personal:
-                target_folder_url = f'/personal/{custom_folder_path}'
-            else:
-                target_folder_url = f'/sites/{custom_folder_path}'
+            target_folder_url = f'/{SHAREPOINT_ROOT_FOLDER}/{SHAREPOINT_SITE_NAME}/{custom_folder_path}'
         if folder_name:
             target_folder_url = f'{target_folder_url}/{folder_name}'
         return target_folder_url
     
     
-    def list_files(self, custom_folder_path="", folder_name="", personal=False):
-        """_summary_
+    def list_files(self, custom_folder_path="", folder_name="", author = False):
+        """
+        List files in a specified folder and retrieve metadata, including author information if required (slows down retrieval)
 
         Args:
-            target_folder (str, optional): _description_. Defaults to "".
-            personal (bool, optional): _description_. Defaults to False.
+            custom_folder_path (str, optional): Custom folder path relative to the root. Default is an empty string.
+            folder_name (str, optional): Specific folder name. Default is an empty string.
+            author (bool, optional): Whether to include author information for each file. Default is False.
 
         Returns:
-            _type_: _description_
+            list: A list of dictionaries containing metadata for each file, including:
+                - name (str): File name.
+                - server_relative_url (str): URL relative to the server.
+                - time_created (str): Creation time in "YYYY-MM-DD HH:MM:SS" format.
+                - time_last_modified (str): Last modification time in "YYYY-MM-DD HH:MM:SS" format.
+                - author (str, optional): Author's email if `author=True`.
+                - editor (str): Editor ID if available.
+                - uniqueId (str): Unique identifier for the file.
+
+        Raises:
+            Exception: If the specified folder cannot be accessed.
         """
         file_metadata = []
 
         # Decide the base URL based on whether it's personal or a team site
-        target_folder_url = self._select_folder(custom_folder_path, folder_name, personal)
+        target_folder_url = self._select_folder(custom_folder_path, folder_name)
 
         # Extract folder name from the path
         folder_name = target_folder_url.split("/")[-1]
@@ -86,7 +99,7 @@ class Sharepoint():
             # Get the folder by the server-relative URL
             root_folder = self.conn.web.get_folder_by_server_relative_url(target_folder_url)
             
-            # Expand the folder to include files and subfolders (this is why we use 'expand')
+            # Expand the folder to include files and subfolders
             root_folder.expand(["Files", "Folders"]).get().execute_query()  # No way to include author here
             print(f'Archivos presentes en la carpeta "{folder_name}":')
             print(f"Total de archivos encontrados: {len(root_folder.files)}")
@@ -96,10 +109,8 @@ class Sharepoint():
 
         # Iterate over the files and retrieve metadata
         for file in root_folder.files:
-            # Ensure ListItemAllFields is loaded
+            # Access fields
             list_item = file.listItemAllFields
-
-            # Safely access fields
             editor = getattr(list_item, "EditorId", None)  # Editor ID or None if not present
             time_created = file.time_created  # Directly access if it's a datetime object
             time_modified = file.time_last_modified  # Directly access if it's a datetime object
@@ -108,19 +119,22 @@ class Sharepoint():
             time_created = time_created.strftime("%Y-%m-%d %H:%M:%S") if time_created else None
             time_modified = time_modified.strftime("%Y-%m-%d %H:%M:%S") if time_modified else None
 
-            #Ensure that the author property is loaded (slows down retrieval)
-            # file.context.load(file, ["Author"])  # Explicitly load the author property 
-            # file.context.execute_query()
-            #Access the author data (returns email)
-            # author_data = file.author
-            # print(author_data)
+            # Retrieve author information if requested
+            author_data = None
+            if author:
+                try:
+                    file.context.load(file, ["Author"])
+                    file.context.execute_query()
+                    author_data = file.author.email if hasattr(file.author, "email") else "Unknown"
+                except Exception as e:
+                    print(f"Error retrieving author information for file {file.name}: {e}")
             
             file_metadata.append({
                 "name": file.name,
                 "server_relative_url": file.serverRelativeUrl,
                 "time_created": time_created,
                 "time_last_modified": time_modified,
-                "author": file.author,
+                "author": author_data,
                 "editor": editor,
                 "uniqueId": file.unique_id,
             })
@@ -128,11 +142,46 @@ class Sharepoint():
 
         return file_metadata
     
+    def ensure_folders_exist(self, path):
+        """
+        Ensures all folders in the given path exist on SharePoint.
+
+        Args:
+            path (str): The folder path to create (e.g., "Parent/Child/Grandchild").
+        
+        Returns:
+            str: "created" if any folder was created, "exists" if the entire path already existed.
+        """
+        try:
+            folder_path = path.strip("/")  # Remove any leading/trailing slashes
+            folder_names = folder_path.split("/")  # Split the path into individual folder names
+
+            # Start at the root of the document library
+            parent_folder = self.conn.web.folders.get_by_url(folder_names[0])
+            self.conn.load(parent_folder)
+            self.conn.execute_query()
+
+            # Traverse and create folders incrementally
+            for folder_name in folder_names[1:]:
+                sub_folder = parent_folder.folders.add(folder_name)
+                self.conn.execute_query()
+                parent_folder = sub_folder  # Move to the newly created/ensured folder
+
+            return "created"
+
+        except Exception as e:
+            # Handle the case where folders already exist
+            if "already exists" in str(e).lower():
+                return "exists"
+            print(f"Failed to ensure folders exist for path '{path}'. Error: {e}")
+            raise
+
     
-    def upload_file(self, file_name, custom_folder_path="", folder_name="", create_folder = False, personal = False):
+    def upload_file(self, file_name, custom_folder_path="", create_folder = False):
         """
         Uploads a file to SharePoint. Optionally, a folder can be created with the same name as the file.
-
+        Needs server-relative path (from /sites/)
+        
         Args:
             file_name (str): Name of the file to upload, including the extension.
             target_folder_path (str, optional): SharePoint folder path to upload the file to 
@@ -147,72 +196,81 @@ class Sharepoint():
         with open(file_path, "rb") as file:
             content = file.read()  # Read binary content of the file       
 
-        # Construct the target SharePoint folder URL
-        target_folder_url = self._select_folder(custom_folder_path, personal)
+    # Construir la URL del folder en SharePoint
+        try:
+            target_folder_url = self._select_folder(custom_folder_path)
+        except Exception as e:
+            print(f"Error al construir la URL del folder '{custom_folder_path}': {e}")
+            return False
+
+        # Crear carpeta si es necesario
+        if create_folder and custom_folder_path:
+            try:
+                folder_status = self.ensure_folders_exist(custom_folder_path)
+                print(f"Carpeta '{custom_folder_path}' creada o ya existente: {folder_status}")
+            except Exception as e:
+                print(f"Error al crear/verificar la carpeta '{custom_folder_path}': {e}")
+                return False
+
+        # Subir el archivo al folder de SharePoint
+        try:
+            target_folder = self.conn.web.get_folder_by_server_relative_path(target_folder_url)
+            self.conn.load(target_folder)
+            self.conn.execute_query()
+        except Exception as e:
+            print(f"Error al acceder a la carpeta de destino '{target_folder_url}': {e}")
+            return False
 
         try:
-            # Folder creation logic
-            if create_folder:
-                folder_name = os.path.splitext(file_name)[0]
-                folder_list = self.list_files(target_folder_url)
-                if folder_name not in folder_list:
-                    # Create folder if it doesn't exist
-                    new_folder_url = f"{target_folder_url}/{folder_name}"
-                    self.conn.web.ensure_folder_path(new_folder_url).execute_query()
-                    print(f"Folder '{folder_name}' created successfully.")
-                    target_folder_url = new_folder_url
-
-            # Get the target_folder object
-            target_folder = self.conn.web.get_folder_by_server_relative_path(target_folder_url)
-
-            # Upload the file            
             upload_status = target_folder.upload_file(file_name, content).execute_query()
             if upload_status:
-                print(f"File '{file_name}' uploaded successfully to '{target_folder_url}'.")
+                print(f"Archivo '{file_name}' subido exitosamente a '{target_folder_url}'.")
                 return True
+            else:
+                print(f"Error desconocido al subir el archivo '{file_name}' a '{target_folder_url}'.")
+                return False
         except Exception as e:
-            print(f'No se pudo subir el archivo {file_name} a la carpeta "{target_folder_url}')
+            print(f"Error al subir el archivo '{file_name}' a la carpeta '{target_folder_url}': {e}")
             return False
 
 
-    def allocate_files_from_folder(self, dictionary, personal):
-        """
-        No tiene mucha utilidad por ahora
+    # def allocate_files_from_folder(self, dictionary, personal):
+    #     """
+    #     No tiene mucha utilidad por ahora
 
-        Args:
-            folder_name (str)
+    #     Args:
+    #         folder_name (str)
 
-        Returns:
-            uploaded_files (list)
-        """
-        uploaded_files = []
-        local_folder_path = UPLOAD_PATH
+    #     Returns:
+    #         uploaded_files (list)
+    #     """
+    #     uploaded_files = []
+    #     local_folder_path = UPLOAD_PATH
 
-        # Verificar que la carpeta local exista
-        if not os.path.exists(local_folder_path):
-            print(f"La carpeta local {local_folder_path} no existe.")
-            return uploaded_files  # Si la carpeta no existe, retornar lista vacía
+    #     # Verificar que la carpeta local exista
+    #     if not os.path.exists(local_folder_path):
+    #         print(f"La carpeta local {local_folder_path} no existe.")
+    #         return uploaded_files  # Si la carpeta no existe, retornar lista vacía
         
-        try:
-            for file_name in os.listdir(local_folder_path):
-                file_path = os.path.join(local_folder_path, file_name)
+    #     try:
+    #         for file_name in os.listdir(local_folder_path):
+    #             file_path = os.path.join(local_folder_path, file_name)
 
-                if os.path.isfile(file_path):
-                    try:
-                        upload_status = self.upload_file(file_name, )
+    #             if os.path.isfile(file_path):
+    #                 try:
+    #                     upload_status = self.upload_file(file_name, )
 
-                        if upload_status:
-                            uploaded_files.append(file_name)
-                    except Exception as e:
-                        print(f"Error subiendo el archivo {file_name}: {e}")
+    #                     if upload_status:
+    #                         uploaded_files.append(file_name)
+    #                 except Exception as e:
+    #                     print(f"Error subiendo el archivo {file_name}: {e}")
 
-        except Exception as e:
-            print(f"Error al acceder a la carpeta local {local_folder_path}: {e}")
+    #     except Exception as e:
+    #         print(f"Error al acceder a la carpeta local {local_folder_path}: {e}")
 
-        print(f"Total de archivos subidos: {len(uploaded_files)}")
-        return uploaded_files
+    #     print(f"Total de archivos subidos: {len(uploaded_files)}")
+    #     return uploaded_files
         
-
     def download_file(self, file_url, file_name):
         """
         Descarga un archivo específico de SharePoint.
@@ -242,11 +300,11 @@ class Sharepoint():
             return None
         
         
-    def download_single_file(self, file_name, custom_folder_path = "", personal = False):
+    def download_single_file(self, file_name, custom_folder_path = ""):
         """
         Falta modularizar
         """
-        target_folder_url = self._select_folder(custom_folder_path, personal)
+        target_folder_url = self._select_folder(custom_folder_path)
         file_url = f'{target_folder_url}/{file_name}'
 
         try:
@@ -255,7 +313,7 @@ class Sharepoint():
             print(f"Error al descargar el archivo '{file_name}': {e}")
         return local_file_path
     
-    def download_files_from_folder(self, custom_folder_path="", folder_name="", personal=False, extension=""):
+    def download_files_from_folder(self, custom_folder_path="", folder_name="", extension=""):
         """
         Descarga todos los archivos de una carpeta específica de SharePoint.
         
@@ -270,7 +328,7 @@ class Sharepoint():
             list: Lista de rutas locales de los archivos descargados.
         """
         # Crear la URL de la carpeta de destino
-        target_folder_url = self._select_folder(custom_folder_path, folder_name, personal)
+        target_folder_url = self._select_folder(custom_folder_path, folder_name)
 
         # Listar los archivos de la carpeta
         files_metadata = self.list_files(custom_folder_path, folder_name, personal)
