@@ -27,7 +27,7 @@
 │
 ├── logs/                          # Carpeta para guardar logs del proceso
 │
-├── descargas/                     # Carpeta temporal para descargas
+└── descargas/                     # Carpeta temporal para descargas
 
 
 
