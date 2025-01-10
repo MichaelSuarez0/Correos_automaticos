@@ -26,21 +26,25 @@ SHAREPOINT_FOLDER = os.getenv("SHAREPOINT_FOLDER") # Ruta del canal (execu compa
 SHAREPOINT_DOC = os.getenv("SHAREPOINT_DOC") # Ruta específica del folder (Prueba)
 SHAREPOINT_USERNAME = os.getenv("SHAREPOINT_USERNAME") # no usar os.path.join()
 
-# Otras carpetas
-excel_name = "Registro de participación DNPE 1.xlsx"
 
 
 ## 1. Iniciar variables
 file_manager = FileManager(search_directory= UPLOAD_PATH)
 session = Sharepoint()
 session._auth()
-excel_path = os.path.join(script_dir, "..", "docs", "Registro de Participación con adjuntos_v3.xlsx")
+excel_path = os.path.join(script_dir, "..", "docs", "Registro de Participación con adjuntos_v4.xlsx")
 df_merged = pd.read_excel(excel_path)
+
+meses = {
+    "01": "Enero", "02": "Febrero", "03": "Marzo", "04": "Abril",
+    "05": "Mayo", "06": "Junio", "07": "Julio", "08": "Agosto",
+    "09": "Septiembre", "10": "Octubre", "11": "Noviembre", "12": "Diciembre"
+}
 
 
 ## 2. Descargar los adjuntos del folder
 file_list = file_manager.list_files()
-#session.download_files_from_folder(personal=True)
+#session.download_files_from_folder()
 
 
 ## 3. Definir función principal
@@ -48,27 +52,48 @@ def allocate_files_from_folder(data, file_name: str):
     code = ""
     if file_name in data["name"].values:
         row_index = data.index[data["name"] == file_name][0]
+
+        # Actividad operativa
         AOI = data.loc[row_index, "Seleccione la actividad operativa o tema relacionado"]
         if AOI == "Asistencia técnica (Políticas y planes)":
-            code = "366"
+            code = 'ATECNICA'
         elif AOI == "Espacios de difusión (Estudios/plataformas)":
-            code = "365"
+            AOI = "Espacios de difusión (Estudios y plataformas)" # Para que no haya problema con los paths
+            code = "DIFUSION"
         elif AOI == "Instrumentos técnicos en prospectiva":
-            code = "364"
+            code = "INSTRUME"
         elif AOI == "Convenios":
-            code = "369"
+            code = "CONSULTA"
+
+        # Fecha 
+        fecha = data.loc[row_index, "Fecha de ejecución de la actividad"]
+        y,m,d = str(fecha.year), str(fecha.month).zfill(2), str(fecha.day).zfill(2)
+        nombre_mes = meses[m]
+        code = f'{code}-{y}-{m}-{d}'
+
+        # Nivel de Gobierno
+        nivel_gob = data.loc[row_index, "Nivel de Gobierno"]
+        if nivel_gob == "Gobierno Nacional":
+            code = f'{code}-GN'
+        elif nivel_gob == "Gobierno Regional":
+            code = f'{code}-GR'
+        elif nivel_gob == "Gobierno Local":
+            code = f'{code}-GL'
+        else:
+            code = f'{code}-NA'
+
+        # Naturaleza del trabajo
         naturaleza = data.loc[row_index, "Naturaleza del trabajo"]
         if naturaleza == "Revisión de entregables":
             code = f'{code}-ENTREG'
-        elif naturaleza == "Talleres":
+        elif naturaleza in  ["Talleres", "Talleres de capacitación"]:
             code = f'{code}-TALLER'
         elif naturaleza == "Webinar":
             code = f'{code}-WEBINR'
         elif naturaleza == "Convenios":
             code = f'{code}-CONVEN'
-        fecha = data.loc[row_index, "Fecha de ejecución de la actividad"]
-        y,m,d = str(fecha.year), str(fecha.month).zfill(2), str(fecha.day).zfill(2)
-        code = f'{code}-{y}-{m}-{d}'
+
+        # Iniciales del autor
         autor = data.loc[row_index, "Especialista de la DNPE a cargo"]
         if autor in ["Enrique Del Águila", "Alberto Del Aguila"]:
             code = f'{code}-AA'
@@ -77,7 +102,7 @@ def allocate_files_from_folder(data, file_name: str):
             inicial, segundo = autor[0], autor[1]
             code = f'{code}-{inicial[:1]}{segundo[:1]}'
         
-        constructed_url = f'Documentos compartidos/AOI Asistencia técnica/Prueba/{AOI}/{naturaleza}/{code}'
+        constructed_url = f'Documentos compartidos/AOI Asistencia técnica/Prueba/{AOI}/{nombre_mes}/{code}'
         #constructed_url = f'Documentos compartidos/AOI Tendencias/Prueba/{AOI}/{naturaleza}/{code}'
         #print(f' - URL: {constructed_url}, code: {code}')
         try:

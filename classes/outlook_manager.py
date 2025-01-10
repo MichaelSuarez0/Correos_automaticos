@@ -13,6 +13,7 @@ from collections import defaultdict
 import imaplib
 import socket
 
+
 script_dir = os.path.dirname(__file__)
 
 # Cargar variables de entorno
@@ -21,13 +22,12 @@ load_dotenv()
 
 # Variables globales
 SUBJECT_FILTER = os.getenv("SUBJECT_FILTER")
-DOWNLOAD_PATH = os.path.join(script_dir, "..", "descargas")  # Carpeta de descargas
+DOWNLOAD_PATH = os.path.join(script_dir, "..", "descargas") 
 UPLOAD_PATH = os.path.join(script_dir, "..", "descargas", "clasificados")  # Carpeta desde donde se subirán archivos
 TEMPLATES_PATH = os.path.join(script_dir, "..", "email_templates") # Carpeta desde la que se obtendrán los email templates
 
 # Credenciales Outlook
-#IMAP_PORT = os.getenv("IMAP_PORT")  # Puerto para conexión segura
-IMAP_PORT = 993
+IMAP_PORT = os.getenv("IMAP_PORT") 
 IMAP_SERVER = os.getenv("IMAP_SERVER")  
 OUTLOOK_EMAIL = os.getenv("OUTLOOK_EMAIL")
 OUTLOOK_SENDER_EMAIL = os.getenv("OUTLOOK_SENDER_EMAIL")
@@ -118,7 +118,7 @@ class OutlookRetriever:
             start_date (str): Date from which to retrieve emails in the format 'DD-Mon-YYYY' (e.g., "01-Jan-2023").
             subject_filter (str): Text that must be present in the email subject.
             limit (int): Maximum number of emails to retrieve.
-            parameter (str): Additional search parameter (e.g., 'ALL', 'RECENT').
+            parameter (str): Additional search parameter (e.g., 'ALL', 'RECENT'). 
 
         Returns:
             dictionary: a dict containing relevant data of every email fetched
@@ -267,7 +267,7 @@ class OutlookRetriever:
     @staticmethod
     def get_user_attachments(email_data):
         """
-        Creates a new dictionary with senders as keys and attachment
+        Creates a new dictionary with senders as keys and attachments as values
 
         Args:
             email_data (dict): dictionary of email data as obtained from get_emails()_
@@ -371,18 +371,6 @@ class OutlookSender:
 
 
 
-# outlook_session = OutlookSender()
-# outlook_session._auth()
-# outlook_session.send_email(
-#     recipient="drios@ceplan.gob.pe",
-#     subject="Holi",
-#     body = "Este correo fue enviado de forma automática"
-# )
-# outlook_session.logout()
-
-
-
-
 class EmailTemplate:
     def __init__(self, template_name, template_folder="templates"):
         """
@@ -417,35 +405,10 @@ class EmailTemplate:
 
 
 
-
-# sharepoint_session = Sharepoint()
-# sharepoint_session._auth()
-# lista_archivos, _ = sharepoint_session.list_files(target_folder="Tendencias/Tendencias Globales")
-# print(lista_archivos)
-#Sharepoint().download_file(SHAREPOINT_DOC, "t90.docx")
-#Sharepoint().upload_file('t75 - recuperación de la solidaridad.docx', "Tendencias/Tendencias Nacionales")
-
-
-# gestionar subir archivos solo en modo lectura
-
-
-#outlook_session = OutlookRetriever()
-#outlook_session._auth()
+# outlook_session = OutlookRetriever()
+# outlook_session._auth()
 # emails = outlook_session.get_emails(start_date="6-Dec-2024")
 # print(outlook_session.download_attachments(emails))
-
-
-def convert_to_dataframe(emails_data):
-    # Convierte el diccionario de datos de emails en un DataFrame
-    df = pd.DataFrame.from_dict(emails_data, orient='index')
-    
-    # Asegurarse de que los archivos adjuntos se gestionen correctamente
-    # (Si las listas de adjuntos no están vacías, convierte en una cadena, o la mantienes como lista).
-    df['attachments'] = df['attachments'].apply(lambda x: ', '.join(x) if isinstance(x, list) else x)
-    
-    return df
-
-### CREAR UNA FUNCIÓN PARA CAMBIAR EL DICCIONARIO A UNO DE SENDERS_ATTACHMENTS PARA ENVIAR EL CORREO
 
 
 #ruta = os.path.join(DOWNLOAD_PATH)

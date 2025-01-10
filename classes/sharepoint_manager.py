@@ -372,6 +372,16 @@ class Sharepoint():
 
         return downloaded_files
 
-    
+
+# sharepoint_session = Sharepoint()
+# sharepoint_session._auth()
+# lista_archivos, _ = sharepoint_session.list_files(target_folder="Tendencias/Tendencias Globales")
+# print(lista_archivos)
+#Sharepoint().download_file(SHAREPOINT_DOC, "t90.docx")
+#Sharepoint().upload_file('t75 - recuperación de la solidaridad.docx', "Tendencias/Tendencias Nacionales")
+
+
+# gestionar subir archivos solo en modo lectura
+
 
     
