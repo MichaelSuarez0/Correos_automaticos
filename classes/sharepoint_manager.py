@@ -31,8 +31,8 @@ SHAREPOINT_URL_SITE = os.getenv("SHAREPOINT_URL_SITE") # Ruta fija (Enlace)
 SHAREPOINT_FOLDER = os.getenv("SHAREPOINT_FOLDER") # Ruta del folder (Documentos compartidos/AOI Tendencias/Prueba)
 
 # Para manejar diferentes funciones automáticamente
-SHAREPOINT_SITE_NAME = SHAREPOINT_URL_SITE.split("/")[-1]
-SHAREPOINT_ROOT_FOLDER = SHAREPOINT_URL_SITE.split("/")[-2]
+SHAREPOINT_ROOT_FOLDER = SHAREPOINT_URL_SITE.split("/")[-2] # sites 
+SHAREPOINT_SITE_NAME = SHAREPOINT_URL_SITE.split("/")[-1] # DNPE
 personal = True if SHAREPOINT_ROOT_FOLDER == "sites" else False
 
 # Custom folders siempre deben comenzar con "Documentos compartidos" o su equivalente
@@ -200,16 +200,16 @@ class Sharepoint():
         try:
             target_folder_url = self._select_folder(custom_folder_path)
         except Exception as e:
-            print(f"Error al construir la URL del folder '{custom_folder_path}': {e}")
+            print(f"ERROR al construir la URL del folder '{custom_folder_path}': {e}")
             return False
 
         # Crear carpeta si es necesario
         if create_folder and custom_folder_path:
             try:
                 folder_status = self.ensure_folders_exist(custom_folder_path)
-                print(f"Carpeta '{custom_folder_path}' creada o ya existente: {folder_status}")
+                #print(f"Carpeta '{custom_folder_path}' creada o ya existente")
             except Exception as e:
-                print(f"Error al crear/verificar la carpeta '{custom_folder_path}': {e}")
+                print(f"ERROR al crear/verificar la carpeta '{custom_folder_path}': {e}")
                 return False
 
         # Subir el archivo al folder de SharePoint
@@ -218,19 +218,19 @@ class Sharepoint():
             self.conn.load(target_folder)
             self.conn.execute_query()
         except Exception as e:
-            print(f"Error al acceder a la carpeta de destino '{target_folder_url}': {e}")
+            print(f"ERROR al acceder a la carpeta de destino '{target_folder_url}': {e}")
             return False
 
         try:
             upload_status = target_folder.upload_file(file_name, content).execute_query()
             if upload_status:
-                print(f"Archivo '{file_name}' subido exitosamente a '{target_folder_url}'.")
+                print(f" - Archivo '{file_name}' subido exitosamente a '{target_folder_url}'.")
                 return True
             else:
-                print(f"Error desconocido al subir el archivo '{file_name}' a '{target_folder_url}'.")
+                print(f"ERROR desconocido al subir el archivo '{file_name}' a '{target_folder_url}'.")
                 return False
         except Exception as e:
-            print(f"Error al subir el archivo '{file_name}' a la carpeta '{target_folder_url}': {e}")
+            print(f"ERROR al subir el archivo '{file_name}' a la carpeta '{target_folder_url}': {e}")
             return False
 
 
