@@ -17,29 +17,39 @@ script_dir = os.path.dirname(__file__)
 load_dotenv()
 
 # Variables globales
-SUBJECT_FILTER = os.getenv("SUBJECT_FILTER")
 DOWNLOAD_PATH = os.path.join(script_dir, "..", "descargas")  # Carpeta de descargas
 UPLOAD_PATH = os.path.join(script_dir, "..", "descargas", "clasificados")  # Carpeta desde donde se subirán archivos
 TEMPLATES_PATH = os.path.join(script_dir, "..", "email_templates") # Carpeta desde la que se obtendrán los email templates
+SUBJECT_FILTER = "sistematizar" 
 
-# Credenciales Sharepoint
+# Sharepoint credentials from env
 SHAREPOINT_EMAIL = os.getenv("SHAREPOINT_EMAIL")
 SHAREPOINT_PASSWORD = os.getenv("SHAREPOINT_PASSWORD")
 
 # Folders Sharepoint
-SHAREPOINT_URL_SITE = os.getenv("SHAREPOINT_URL_SITE") # Ruta fija (Enlace)
-SHAREPOINT_FOLDER = os.getenv("SHAREPOINT_FOLDER") # Ruta del folder (Documentos compartidos/AOI Tendencias/Prueba)
+SHAREPOINT_URL_SITE = "https://ceplangobpe.sharepoint.com/sites/DNPE"
+SHAREPOINT_FOLDER = "Documentos compartidos/AOI Tendencias/Prueba"  # Ruta del folder de destino
+
+# Folders Sharepoint (usuario personal)
+# SHAREPOINT_URL_SITE = "https://ceplangobpe-my.sharepoint.com/personal/msuarez_ceplan_gob_pe" 
+# SHAREPOINT_FOLDER = "Documents/Aplicaciones/Microsoft Forms/Registro de Asistencia Técnica Participación de la/Question" # Ruta del folder
 
 # Para manejar diferentes funciones automáticamente
 SHAREPOINT_ROOT_FOLDER = SHAREPOINT_URL_SITE.split("/")[-2] # sites 
 SHAREPOINT_SITE_NAME = SHAREPOINT_URL_SITE.split("/")[-1] # DNPE
 personal = True if SHAREPOINT_ROOT_FOLDER == "sites" else False
 
+
 # Custom folders siempre deben comenzar con "Documentos compartidos" o su equivalente
 
 
 class Sharepoint():
-    def __init__(self):
+    def __init__(self, sharepoint_url: str, sharepoint_folder: str):
+        self.SHAREPOINT_URL_SITE = sharepoint_url
+        self.SHAREPOINT_FOLDER = sharepoint_folder
+        self.SHAREPOINT_ROOT_FOLDER = self.SHAREPOINT_URL_SITE.split("/")[-2] # sites 
+        self.SHAREPOINT_SITE_NAME = self.SHAREPOINT_URL_SITE.split("/")[-1] # DNPE
+
         self.conn= None
 
     def _auth(self, url = SHAREPOINT_URL_SITE):
@@ -52,14 +62,23 @@ class Sharepoint():
             print(f"Error al autenticar: {e}")
             return None
     
-    @staticmethod
-    def _select_folder(custom_folder_path = "", folder_name= ""):
-        # Decide the base URL based on whether it's personal or a team site
-        if not custom_folder_path:
-                # If 'persona' is False, the URL will start with '/sites/'
-           target_folder_url = f'/{SHAREPOINT_ROOT_FOLDER}/{SHAREPOINT_SITE_NAME}/{SHAREPOINT_FOLDER}'
+    def logout(self):
+        """Log out from the SharePoint session."""
+        if self.conn:
+            try:
+                # Simply clearing the connection object will log out the session
+                self.conn = None
+                print("Desconexión exitosa de SharePoint.")
+            except Exception as e:
+                print(f"Error al cerrar sesión: {e}")
         else:
-            target_folder_url = f'/{SHAREPOINT_ROOT_FOLDER}/{SHAREPOINT_SITE_NAME}/{custom_folder_path}'
+            print("No hay conexión activa para cerrar sesión.")
+    
+    def _select_folder(self, custom_folder_path = "", folder_name= ""):
+        if not custom_folder_path:
+           target_folder_url = f'/{self.SHAREPOINT_ROOT_FOLDER}/{self.SHAREPOINT_SITE_NAME}/{self.SHAREPOINT_FOLDER}'
+        else:
+            target_folder_url = f'/{self.SHAREPOINT_ROOT_FOLDER}/{self.SHAREPOINT_SITE_NAME}/{custom_folder_path}'
         if folder_name:
             target_folder_url = f'{target_folder_url}/{folder_name}'
         return target_folder_url
@@ -331,7 +350,7 @@ class Sharepoint():
         target_folder_url = self._select_folder(custom_folder_path, folder_name)
 
         # Listar los archivos de la carpeta
-        files_metadata = self.list_files(custom_folder_path, folder_name, personal)
+        files_metadata = self.list_files(custom_folder_path, folder_name)
         if not files_metadata:
             print(f"No se encontraron archivos en la carpeta: {target_folder_url}")
             return []
