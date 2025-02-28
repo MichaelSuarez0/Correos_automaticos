@@ -9,11 +9,18 @@ import logging
 from pprint import pprint
 
 script_dir = os.path.dirname(__file__)
-# Configuración básica del logging
+
+# Configuración del logging para guardar en el archivo con ruta personalizada
+log_file_path = os.path.join(script_dir, "..", "scripts", "file_manager_log.txt")
+
 logging.basicConfig(
-    level=logging.INFO,  # Nivel de registro (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    level=logging.INFO,  # Nivel de registro
     format="%(asctime)s - %(levelname)s - %(message)s",  # Formato del mensaje
-    datefmt="%Y-%m-%d %H:%M:%S"  # Formato de fecha y hora
+    datefmt="%Y-%m-%d %H:%M:%S",  # Formato de fecha y hora
+    handlers=[
+        logging.FileHandler(log_file_path),  # Guardar en la ruta especificada
+        logging.StreamHandler()  # También mostrar en la consola
+    ]
 )
 
 # Cargar variables de entorno
@@ -24,7 +31,7 @@ DOWNLOAD_PATH = os.path.join(script_dir, "..", "descargas")  # Carpeta de descar
 UPLOAD_PATH = os.path.join(script_dir, "..", "descargas", "clasificados")  # Carpeta desde donde se subirán archivos
 TEMPLATES_PATH = os.path.join(script_dir, "..", "email_templates") # Carpeta desde la que se obtendrán los email templates
 
-
+# TODO: Add function to copy files with a specific extension
 class FileManager():
     def __init__(self, search_directory):
         """
@@ -36,11 +43,20 @@ class FileManager():
         self.search_directory = search_directory
         #self.target_directories = target_directories
 
-    def list_files(self) -> list:
-        """Lists all the file names (with extensions) found in the search directory.
+    def list_files(self, extension: str = None, with_extension: bool = True) -> list:
+        """
+        Lista los nombres de archivos presentes en el directorio de búsqueda, 
+        permitiendo filtrar por extensión y seleccionar si se devuelve el nombre
+        con o sin la extensión.
+
+        Args:
+            extension (str, optional): Filtro de extensión (por ejemplo, '.txt'). 
+                Si se deja en None, se listan todos los archivos.
+            with_extension (bool, optional): Si es True, devuelve los nombres con extensión;
+                si es False, devuelve los nombres sin la extensión. Defaults to True.
 
         Returns:
-            file_names_list: list of file names with extensions
+            list: Lista de nombres de archivos filtrados y formateados según los parámetros.
         """
         file_paths_list = []
         file_names_list = []
@@ -55,8 +71,15 @@ class FileManager():
         #print(file_paths_list)
         if not file_paths_list:
             logging.info(" - No se encontraron archivos en la carpeta")
+            return None
+
+        if extension:
+            file_names_list = [file for file in file_names_list if extension == os.path.splitext(file)[1]]
+        
+        if not with_extension:
+            file_names_list = [os.path.splitext(file)[0] for file in file_names_list]
         return file_names_list
-        #return file_paths_list
+    
 
     def rename_files(self, diccionario: dict, lowercase = True) -> list[dict]:
         """
@@ -112,13 +135,17 @@ class FileManager():
 
             # Mover el archivo al destino correspondiente
             os.rename(archivo_path, nuevo_path)
-            logging.info(f" Archivo '{archivo}' -> movido a: {clasificacion}")
+            logging.debug(f" Archivo '{archivo}' -> movido a: {clasificacion}")
 
             # Agregar el mapeo de archivos renombrados
-            renamed_files_map.append({
-                "original_name" : archivo,
-                "new_name" : nuevo_nombre
-            })
+            try:
+                renamed_files_map.append({
+                    "original_name" : archivo,
+                    "new_name" : nuevo_nombre
+                })
+            except UnboundLocalError:
+                logging.error(f" Código del archivo '{archivo} no se encontró en info_obs'")
+
         return renamed_files_map
 
     # def rename_files2(self, format = "" , diccionario = {}):

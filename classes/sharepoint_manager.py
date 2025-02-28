@@ -9,9 +9,21 @@ from office365.sharepoint.files.file import File
 from email.header import decode_header
 from datetime import date, datetime, timedelta
 import time
-
+import logging
 
 script_dir = os.path.dirname(__file__)
+
+log_file_path = os.path.join(script_dir, "..", "scripts", "sharepoint_log.txt")
+
+logging.basicConfig(
+    level=logging.INFO,  # Nivel de registro
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Formato del mensaje
+    datefmt="%Y-%m-%d %H:%M:%S",  # Formato de fecha y hora
+    handlers=[
+        logging.FileHandler(log_file_path),  # Guardar en la ruta especificada
+        logging.StreamHandler()  # También mostrar en la consola
+    ]
+)
 
 # Cargar variables de entorno
 load_dotenv()
@@ -20,7 +32,6 @@ load_dotenv()
 DOWNLOAD_PATH = os.path.join(script_dir, "..", "descargas")  # Carpeta de descargas
 UPLOAD_PATH = os.path.join(script_dir, "..", "descargas", "clasificados")  # Carpeta desde donde se subirán archivos
 TEMPLATES_PATH = os.path.join(script_dir, "..", "email_templates") # Carpeta desde la que se obtendrán los email templates
-SUBJECT_FILTER = "sistematizar" 
 
 # Sharepoint credentials from env
 SHAREPOINT_EMAIL = os.getenv("SHAREPOINT_EMAIL")
@@ -44,20 +55,22 @@ personal = True if SHAREPOINT_ROOT_FOLDER == "sites" else False
 
 
 class Sharepoint():
-    def __init__(self, sharepoint_url: str, sharepoint_folder: str):
+    def __init__(self, sharepoint_url: str, sharepoint_folder: str, connect_on_creation = True):
         self.SHAREPOINT_URL_SITE = sharepoint_url
         self.SHAREPOINT_FOLDER = sharepoint_folder
         self.SHAREPOINT_ROOT_FOLDER = self.SHAREPOINT_URL_SITE.split("/")[-2] # sites 
         self.SHAREPOINT_SITE_NAME = self.SHAREPOINT_URL_SITE.split("/")[-1] # DNPE
+        self.conn = None
+        if connect_on_creation:
+            self.conn= self.auth()
 
-        self.conn= None
-
-    def _auth(self, url = SHAREPOINT_URL_SITE):
+    def auth(self):
         try:
-            self.conn = AuthenticationContext(url)
+            self.conn = AuthenticationContext(self.SHAREPOINT_URL_SITE)
             if self.conn.acquire_token_for_user(SHAREPOINT_EMAIL, SHAREPOINT_PASSWORD):
-                self.conn = ClientContext(url, self.conn)
-                print(f"Autenticación exitosa. Conexión establecida con SharePoint para {url}")
+                self.conn = ClientContext(self.SHAREPOINT_URL_SITE, self.conn)
+                print(f"Autenticación exitosa. Conexión establecida con SharePoint para {self.SHAREPOINT_URL_SITE}")
+                return self.conn
         except Exception as e:
             print(f"Error al autenticar: {e}")
             return None
@@ -161,7 +174,7 @@ class Sharepoint():
 
         return file_metadata
     
-    def ensure_folders_exist(self, path):
+    def ensure_folders_exist(self, path: str):
         """
         Ensures all folders in the given path exist on SharePoint.
 
@@ -196,7 +209,7 @@ class Sharepoint():
             raise
 
     
-    def upload_file(self, file_name, custom_folder_path="", create_folder = False):
+    def upload_file(self, file_name: str, custom_folder_path="", create_folder = False):
         """
         Uploads a file to SharePoint. Optionally, a folder can be created with the same name as the file.
         Needs server-relative path (from /sites/)
@@ -243,13 +256,13 @@ class Sharepoint():
         try:
             upload_status = target_folder.upload_file(file_name, content).execute_query()
             if upload_status:
-                print(f" - Archivo '{file_name}' subido exitosamente a '{target_folder_url}'.")
+                logging.info(f" - Archivo '{file_name}' subido exitosamente a '{target_folder_url}'.")
                 return True
             else:
-                print(f"ERROR desconocido al subir el archivo '{file_name}' a '{target_folder_url}'.")
+                logging.error(f"ERROR desconocido al subir el archivo '{file_name}' a '{target_folder_url}'.")
                 return False
         except Exception as e:
-            print(f"ERROR al subir el archivo '{file_name}' a la carpeta '{target_folder_url}': {e}")
+            logging.error(f"ERROR al subir el archivo '{file_name}' a la carpeta '{target_folder_url}': {e}")
             return False
 
 
@@ -290,7 +303,7 @@ class Sharepoint():
     #     print(f"Total de archivos subidos: {len(uploaded_files)}")
     #     return uploaded_files
         
-    def download_file(self, file_url, file_name):
+    def download_file(self, file_url: str, file_name: str):
         """
         Descarga un archivo específico de SharePoint.
 
@@ -392,7 +405,7 @@ class Sharepoint():
         return downloaded_files
 
 
-# sharepoint_session = Sharepoint()
+#sharepoint_session = Sharepoint(SHAREPOINT_URL_SITE, SHAREPOINT_FOLDER)
 # sharepoint_session._auth()
 # lista_archivos, _ = sharepoint_session.list_files(target_folder="Tendencias/Tendencias Globales")
 # print(lista_archivos)
