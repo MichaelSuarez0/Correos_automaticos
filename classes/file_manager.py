@@ -79,6 +79,15 @@ class FileManager():
         if not with_extension:
             file_names_list = [os.path.splitext(file)[0] for file in file_names_list]
         return file_names_list
+
+
+    @staticmethod
+    def sort_files_by_number(file_list: list) -> list:
+        def extract_number(text: str) -> int:   
+            # This finds all numbers in the string and returns the first occurrence.
+            numbers = re.findall(r'\d+', text)
+            return int(numbers[0]) if numbers else float('inf')
+        return sorted(file_list, key=extract_number)
     
 
     def rename_files(self, diccionario: dict, lowercase = True) -> list[dict]:

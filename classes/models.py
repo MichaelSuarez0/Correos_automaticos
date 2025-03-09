@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, RootModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional, Literal
 
 class EmailData(BaseModel):
@@ -16,6 +16,7 @@ class AttachmentLog(BaseModel):
     new_name: str
     original_name: str
     path: str
+    author: EmailStr
     sharepoint_uploaded: Optional[bool] = None
 
 

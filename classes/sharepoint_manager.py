@@ -58,6 +58,7 @@ class Sharepoint():
     def __init__(self, sharepoint_url: str, sharepoint_folder: str, connect_on_creation = True):
         self.SHAREPOINT_URL_SITE = sharepoint_url
         self.SHAREPOINT_FOLDER = sharepoint_folder
+        self.SHAREPOINT_URL_BASE = "/".join(self.SHAREPOINT_URL_SITE.split("/")[:-2]) #.com
         self.SHAREPOINT_ROOT_FOLDER = self.SHAREPOINT_URL_SITE.split("/")[-2] # sites 
         self.SHAREPOINT_SITE_NAME = self.SHAREPOINT_URL_SITE.split("/")[-1] # DNPE
         self.conn = None
@@ -256,7 +257,7 @@ class Sharepoint():
         try:
             upload_status = target_folder.upload_file(file_name, content).execute_query()
             if upload_status:
-                logging.info(f" - Archivo '{file_name}' subido exitosamente a '{target_folder_url}'.")
+                logging.info(f" - Archivo '{file_name}' subido exitosamente a '{self.SHAREPOINT_URL_BASE}{target_folder_url}'.")
                 return True
             else:
                 logging.error(f"ERROR desconocido al subir el archivo '{file_name}' a '{target_folder_url}'.")

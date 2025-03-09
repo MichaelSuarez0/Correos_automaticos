@@ -13,7 +13,7 @@ from collections import defaultdict
 import imaplib
 import socket
 from tenacity import retry, stop_after_attempt, wait_fixed
-from correos_automaticos.classes.storing_models import EmailData
+from correos_automaticos.classes.models import EmailData
 
 script_dir = os.path.dirname(__file__)
 
