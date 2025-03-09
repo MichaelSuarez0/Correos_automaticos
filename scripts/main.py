@@ -3,8 +3,8 @@ import os
 import re
 import json
 from shutil import move
-from datetime import date, timedelta
 from dotenv import load_dotenv
+from pydantic import EmailStr
 from correos_automaticos.classes.outlook_manager import OutlookRetriever, OutlookSender
 from correos_automaticos.classes.file_manager import FileManager
 from correos_automaticos.classes.sharepoint_manager import Sharepoint
@@ -12,20 +12,14 @@ from pprint import pprint
 from collections import defaultdict
 from icecream import ic
 import logging
+from correos_automaticos.classes.storing_models import EmailData, AttachmentLog
 
 
 # -------------------------------------------------------------
 # --------------- 0. Definir variables globales ---------------
 # -------------------------------------------------------------
-# Configuración básica del logging
-logging.basicConfig(
-    level=logging.INFO,  # Nivel de registro (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    format="%(asctime)s - %(levelname)s - %(message)s",  # Formato del mensaje
-    datefmt="%Y-%m-%d %H:%M:%S"  # Formato de fecha y hora
-)
 
 # Configuración global
-
 load_dotenv()
 script_dir = os.path.dirname(__file__)
 SHAREPOINT_URL = "https://ceplangobpe.sharepoint.com/sites/DNPE"
@@ -45,10 +39,22 @@ ruta_json_2 = os.path.join(script_dir, "..", "..", 'datasets', "info_obs.json")
 with open(ruta_json_2, "r", encoding='utf-8') as file:
     info_obs = json.load(file)
 
+# Configuración del logging para guardar en el archivo con ruta personalizada
+log_file_path = os.path.join(script_dir, "correos_log.txt")
+
+logging.basicConfig(
+    level=logging.INFO,  # Nivel de registro
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Formato del mensaje
+    datefmt="%Y-%m-%d %H:%M:%S",  # Formato de fecha y hora
+    handlers=[
+        logging.FileHandler(log_file_path),  # Guardar en la ruta especificada
+        logging.StreamHandler()  # También mostrar en la consola
+    ]
+)
 # --------------------------------------------------------------
 # ------------- 1. Definir funciones subordinadas --------------
 # --------------------------------------------------------------
-def find_file_path(file_name: str, regex_dict: dict = rubros_subrubros) -> str:
+def construct_file_path(file_name: str, regex_dict: dict = rubros_subrubros) -> str:
     """
     Clasifica una ficha según su nombre a partir del diccionario rubros_subrubros.
 
@@ -78,7 +84,7 @@ def find_file_path(file_name: str, regex_dict: dict = rubros_subrubros) -> str:
     return ""
 
 
-def construct_user_attachments(email_data: dict, renamed_files_map: list)-> dict:
+def construct_user_attachments(emails_data: list[EmailData], renamed_files_map: list)-> dict[EmailStr, AttachmentLog]:
     """
     Reconstructs email_data dict to another dict suitable for sending confirmation emails to users based on uploaded attachments
 
@@ -90,28 +96,20 @@ def construct_user_attachments(email_data: dict, renamed_files_map: list)-> dict
         dict: A dictionary with senders as keys, attachments as subkeys, and details as values.
     """
     user_attachments_log = {}
-    
-    # Iterar sobre los valores en email_data
-    for details in email_data.values():
-        sender = details.get("from_email")
 
-        if not sender:
-            logging.info("No sender found for email details:", details) 
-            continue
+    # Iterar sobre los valores en email_data
+    for email_data in emails_data:
+        sender = email_data.from_email
 
         # Inicializar diccionario para el remitente si no existe
         if sender not in user_attachments_log:
             user_attachments_log[sender] = []
         
         # Obtener lista de adjuntos
-        attachments = details.get("attachments", [])
-        if not attachments:
-            logging.info(f"No attachments found for sender {sender}")  # Depuración
-            continue
-        
+        attachments = email_data.attachments
+
         # Iterar sobre los nombres originales de los archivos adjuntos
         for old_file_name in attachments:
-            new_file_name = ""
 
             # Obtener el nuevo nombre del archivo del mapa de renombrados
             for file_dict in renamed_files_map:
@@ -120,11 +118,12 @@ def construct_user_attachments(email_data: dict, renamed_files_map: list)-> dict
                     new_file_name = file_dict.get('new_name')
                 
                     # Construir la entrada del archivo
-                    user_attachments_log[sender].append({
-                        "original_name": old_file_name,
-                        "new_name": file_dict.get('new_name'),
-                        "path": find_file_path(new_file_name)
-                    })
+                    attachment_log = AttachmentLog(
+                        original_name = old_file_name,
+                        new_name= new_file_name,
+                        path = construct_file_path(new_file_name)
+                    )
+                    user_attachments_log[sender].append(attachment_log)
                     break
             else:
                 logging.info(f"File {old_file_name} not found in renamed_files_map for sender {sender}")  # Depuración
@@ -138,6 +137,8 @@ def construct_user_attachments(email_data: dict, renamed_files_map: list)-> dict
 # -------------------------------------------------------------
 # ------------- 2. Definir funciones principales --------------
 # -------------------------------------------------------------
+
+### OutlookRetriever
 def obtener_archivos(start_date: str):
     """_summary_
 
@@ -154,6 +155,7 @@ def obtener_archivos(start_date: str):
     return email_data
 
 
+### FileManager
 def renombrar_y_clasificar(search_directory = DOWNLOAD_PATH, email_data = {}):
     """_summary_
 
@@ -172,34 +174,37 @@ def renombrar_y_clasificar(search_directory = DOWNLOAD_PATH, email_data = {}):
     return user_attachments_log
 
 
+# TODO: Update to pydantic
+### Sharepoint
 def upload_files_to_sharepoint(user_attachments_log: dict):
     sharepoint_tendencias = Sharepoint(SHAREPOINT_URL, SHAREPOINT_FOLDER_TENDENCIAS, connect_on_creation=False)
     sharepoint_ryo = Sharepoint(SHAREPOINT_URL, SHAREPOINT_FOLDER_RYO, connect_on_creation=False)
 
     for sender, file_list in user_attachments_log.items():
         for attachment_details in file_list:
-            path = attachment_details.get("path")
-            path_folders = path.split("/")
+            file_path = attachment_details.get("path")
+            path_folders = file_path.split("/")
+            new_file_name = attachment_details.get("new_name")
 
             # Determinar en qué SharePoint subir el archivo
             if path_folders[0].upper() == "TENDENCIAS":
+                if not sharepoint_tendencias.conn:
+                    sharepoint_tendencias.auth()
                 sharepoint_session = sharepoint_tendencias
-                custom_folder_path = f'{SHAREPOINT_FOLDER}/AOI Tendencias/{path[1:]}'
+                custom_folder_path = f'{SHAREPOINT_FOLDER}/AOI Tendencias/{"/".join(path_folders[1:])}'
             else:
+                if not sharepoint_ryo.conn:
+                    sharepoint_ryo.auth()
                 sharepoint_session = sharepoint_ryo
-                custom_folder_path = f'{SHAREPOINT_FOLDER}/AOI Riesgos y oportunidades/{path[1:]}'
+                custom_folder_path = f'{SHAREPOINT_FOLDER}/AOI Riesgos y oportunidades/{"/".join(path_folders[1:])}'
 
             # Construir la ruta de la carpeta según la condición
             if len(path_folders) < 3:
-                # OBTENER EL DEPARTAMENTO DEL CÓDIGO
-                dpto = ""
-                custom_folder_path = f'{custom_folder_path}/{dpto}'
-
-            new_file_name = attachment_details.get("new_name")
+                custom_folder_path = f'{custom_folder_path}/{os.path.splitext(new_file_name)[0]}'
 
             try:
                 # Subir archivo a SharePoint
-                sharepoint_session.upload_file(new_file_name, custom_folder_path, create_folder=True)
+                #sharepoint_session.upload_file(new_file_name, custom_folder_path, create_folder=True)
                 # Actualizar estado en el log
                 attachment_details["sharepoint_status"] = "uploaded"
             except Exception as e:
@@ -207,6 +212,8 @@ def upload_files_to_sharepoint(user_attachments_log: dict):
 
     return user_attachments_log
 
+
+### OutlookSender
 def send_confirmation_emails(user_attachments_log):
     outlook_sender_session = OutlookSender()
     outlook_sender_session.send_emails_with_template(user_attachments_log, "sharepoint_success.html")
@@ -220,10 +227,12 @@ def send_confirmation_emails(user_attachments_log):
 def main(start_date: str):
     email_data = obtener_archivos(start_date)                                    # OutlookRetriever
     user_attachments_log = renombrar_y_clasificar(DOWNLOAD_PATH, email_data)     # FileManager
-    user_attachments_log= upload_files_to_sharepoint(user_attachments_log)       # Sharepoint
-    send_confirmation_emails(user_attachments_log)                               # OutlookSender
+    #user_attachments_log= upload_files_to_sharepoint(user_attachments_log)       # Sharepoint
+    #send_confirmation_emails(user_attachments_log)                               # OutlookSender
     ic(email_data)
     ic(user_attachments_log)
 
+
+# TODO: Ver los productos de los locadores para encontrar fichas a subir
 if __name__ == "__main__":
-    main("21-Feb-2025")
+    main("25-Feb-2025")

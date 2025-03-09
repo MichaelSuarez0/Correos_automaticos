@@ -12,13 +12,13 @@ import re
 from collections import defaultdict
 import imaplib
 import socket
-
+from tenacity import retry, stop_after_attempt, wait_fixed
+from correos_automaticos.classes.storing_models import EmailData
 
 script_dir = os.path.dirname(__file__)
 
 # Cargar variables de entorno
 load_dotenv()
-
 
 # Variables globales
 SUBJECT_FILTER = os.getenv("SUBJECT_FILTER")
@@ -39,7 +39,8 @@ SMTP_PORT = os.getenv("SMTP_PORT")
 class OutlookRetriever:
     def __init__(self):
         self.mail = None
-        
+
+    @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))    
     def _auth(self):
         print("- Intentando establecer conexión con Outlook...")
         try:
@@ -110,7 +111,7 @@ class OutlookRetriever:
             # Si falla la decodificación MIME, intentar safe_decode directamente
             return self.safe_decode(text)
                 
-    def get_emails(self, start_date=None, subject_filter=SUBJECT_FILTER, parameter="ALL"):
+    def get_emails(self, start_date=None, subject_filter=SUBJECT_FILTER, parameter="ALL") -> list[EmailData]:
         """
         Filters emails by date or subject (optional). If no date is provided, retrieves all emails.
 
@@ -125,7 +126,7 @@ class OutlookRetriever:
         """
         if not self.mail:
             raise ValueError("Debes autenticarte usando el método `_auth`")
-        email_data = {}
+        emails_data = []
         try:
             self.mail.select("INBOX")
 
@@ -191,29 +192,31 @@ class OutlookRetriever:
                                 from_name = sender_match.group(1).strip()  # Extract name before <email>
                                 from_email = sender_match.group(2)  # Extract the email inside <>
 
-                            # Store in dictionary with updated format
-                            email_data[msg_id.decode()] = {
-                                "from_name": from_name,
-                                "from_email": from_email,
-                                "sent": date,
-                                "to": recipient,
-                                "subject": subject,
-                                "body": body,
-                                "attachments": attachments
-                            }
+                            # Store in a list with updated format
+                            emails_data.append(EmailData(
+                                msg_id = msg_id.decode(),
+                                from_name= from_name,
+                                from_email = from_email,
+                                sent = date,
+                                to = recipient,
+                                subject = subject,
+                                body = body,
+                                attachments = attachments        
+                            ))
+                        
                                       
                 except Exception as e:
                     print(f"Error processing email with ID {msg_id}: {e}")
 
             print(f'- Se han obtenido {len(message_ids)} IDs de correos luego de aplicar el filtro')
-            return email_data
+            return emails_data
 
         except Exception as e:
             print(f"Error retrieving emails: {e}")
-            return {}
+            return []
 
 
-    def download_attachments(self, email_data):
+    def download_attachments(self, emails_data: list[EmailData])-> list:
         """
         Downloads attachments from email data dictionary
 
@@ -221,10 +224,11 @@ class OutlookRetriever:
             email_data (dict)
 
         Returns:
-            email_data (dict): 
+            None 
         """
         attachment_names = []
-        for msg_id, msg_dict in email_data.items():
+        for email_data in emails_data:
+            msg_id = email_data.msg_id
             try:
                 self.mail.select("INBOX")
                 status, msg_data = self.mail.fetch(msg_id.encode(), "(RFC822)")
@@ -322,7 +326,7 @@ class OutlookSender:
         except Exception as e:
             print(f"- Error al enviar el correo: {e}")
 
-    def send_emails_with_template(self, user_attachments_log, template_name, templates_path=TEMPLATES_PATH, sender_name= "Outlook Bot"):
+    def send_emails_with_template(self, user_attachments_log: dict, template_name: str, templates_path=TEMPLATES_PATH, sender_name= "Outlook Bot"):
         if not self.smtp_server:
             raise ValueError("Debes autenticarte antes de enviar correos usando el método `auth`.")
         if template_name.endswith(".html") or template_name.endswith(".htm"):
@@ -339,10 +343,10 @@ class OutlookSender:
             template = ' '.join(template_file.read().split())
             
         try:
-            for sender, subdict in user_attachments_log.items():
+            for sender, file_list in user_attachments_log.items():
                 try:
                     attachments_body_details = []
-                    for attachment, attachments_details in subdict.items():
+                    for attachments_details in file_list:
                         original_name = attachments_details.get("original_name")
                         new_name = attachments_details.get("new_name")
                         path = attachments_details.get("path")
